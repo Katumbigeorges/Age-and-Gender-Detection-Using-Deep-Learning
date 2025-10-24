@@ -35,12 +35,16 @@
       <div class="photo-htm">
         <form action="/upload" method="POST" enctype="multipart/form-data" style="color: #aaa">
           <br><br>Select image to upload:<br><br><br>
-          <input type="file" name="fileToUpload" id="fileToUpload">
+          <input type="file" name="fileToUpload" id="fileToUpload" accept="image/*" required>
           <br><br><br><br>
         <div class="group">
           <input type="submit" class="button" value="Upload and detect" name="submit">
         </div>
         </form>
+        <div style="margin-top: 20px; color: #666; font-size: 12px;">
+          Supported formats: PNG, JPG, JPEG, GIF, BMP<br>
+          Maximum file size: 16MB
+        </div>
       </div>
     </div>
   </div>

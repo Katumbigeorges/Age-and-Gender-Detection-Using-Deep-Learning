@@ -5,7 +5,7 @@
     <!-- Required meta tags -->
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <link rel="stylesheet" href="static/css/style.css">
+    <link rel="stylesheet" href="../static/styles/style.css">
 
     <title>Photo Detection</title>
     <style>
@@ -17,24 +17,36 @@
             background-attachment: fixed;
             color: #6cacc5;
         }
-        img {
-            margin-left: 110px;
-            padding: 0;
-            width: 80vw;
-            height: 80vh;
+        .upload-container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: rgba(42,50,113, 0.3);
+            border-radius: 10px;
+            text-align: center;
+        }
+        .file-input {
+            margin: 20px 0;
+            padding: 10px;
+            background: rgba(42,50,113, 0.5);
+            border: 2px dashed #6cacc5;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .file-input:hover {
+            background: rgba(42,50,113, 0.7);
+        }
+        .result-container {
+            margin-top: 30px;
+            text-align: center;
+        }
+        .result-image {
+            max-width: 100%;
+            max-height: 500px;
             border: 2px solid #6cacc5;
             border-radius: 4px;
+            margin: 20px 0;
         }
-        button {
-            float: left;
-        }
-        h2 {
-            text-align: center;
-            font-family: 'EB Garamond', serif;
-           /*color: #ff1a1a;*/
-            text-shadow: 2px 2px 4px #000000;
-        }
-        /* --- STYLING THE BUTTONS --- */
         button {
             border: 0;
             background: rgba(42,50,113, .28);
@@ -44,10 +56,28 @@
             margin: 0.25em;
             transition: all 0.5s;
             border-radius: 4px;
+            padding: 10px 20px;
         }
-        /* --- WHEN THE CURSOR HOVERS OVER THE BUTTONS THE COLOR CHNAGES --- */
         button:hover {
             background: #201e40;
+        }
+        h2 {
+            text-align: center;
+            font-family: 'EB Garamond', serif;
+            text-shadow: 2px 2px 4px #000000;
+        }
+        .error-message {
+            color: #ff6b6b;
+            margin: 10px 0;
+        }
+        .success-message {
+            color: #51cf66;
+            margin: 10px 0;
+        }
+        .loading {
+            display: none;
+            color: #6cacc5;
+            margin: 20px 0;
         }
     </style>
 </head>
@@ -58,9 +88,51 @@
             <h2>Detecting Age and Gender from Photo</h2>
         </div>
         
-        <div class="container">   
-            <img src="{{ url_for('upload_file') }}" width="100%">
+        <div class="upload-container">
+            <form action="/upload" method="POST" enctype="multipart/form-data" id="uploadForm">
+                <div class="file-input">
+                    <input type="file" name="fileToUpload" id="fileToUpload" accept="image/*" required>
+                    <p>Select an image file (PNG, JPG, JPEG, GIF, BMP)</p>
+                </div>
+                <button type="submit" id="submitBtn">Upload and Detect</button>
+            </form>
+            
+            <div class="loading" id="loading">
+                <p>Processing image... Please wait.</p>
+            </div>
+            
+            <div class="result-container" id="resultContainer" style="display: none;">
+                <h3>Detection Result:</h3>
+                <img id="resultImage" class="result-image" alt="Detection result">
+            </div>
+            
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="error-message">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
         </div>
     </div>
+
+    <script>
+        document.getElementById('uploadForm').addEventListener('submit', function() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultContainer').style.display = 'none';
+        });
+        
+        document.getElementById('fileToUpload').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    document.getElementById('resultImage').src = e.target.result;
+                    document.getElementById('resultContainer').style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    </script>
 </body>
 </html>

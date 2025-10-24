@@ -1,52 +1,47 @@
-'''
-OpenCV (Open Source Computer Vision) is a library with functions that mainly aiming real-time computer vision.
-OpenCV supports Deep Learning frameworks Caffe which has been implemented in this project.
-With OpenCV we have perform face detection using pre-trained
-deep learning face detector model which is shipped with the library.
-'''
-# Import the necessary packages
+"""
+Age and Gender Detection Web Application
+
+A Flask-based web application that uses deep learning models to detect
+age and gender from images and live video streams.
+
+Author: Katumbigeorges (Original)
+Improved by: AI Assistant
+"""
+
 import cv2
 import numpy as np
-import math
 import argparse
-from flask import Flask, render_template, Response, request
+import os
+import logging
+from flask import Flask, render_template, Response, request, jsonify, flash, redirect, url_for
 from PIL import Image
 import io
 
-UPLOAD_FOLDER = './UPLOAD_FOLDER'
+# Import custom modules
+from config import config, Config
+from models import model_manager
+from utils import allowed_file, create_upload_folder, validate_image_file, format_age_gender_result
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize Flask app
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Load configuration
+config_name = os.environ.get('FLASK_ENV', 'development')
+app.config.from_object(config[config_name])
 
 
+# Legacy functions for backward compatibility
 def highlightFace(net, frame, conf_threshold=0.7):
-    frameOpencvDnn = frame.copy()
-    frameHeight = frameOpencvDnn.shape[0]
-    frameWidth = frameOpencvDnn.shape[1]
-    # Grab the frame dimensions and convert it to a blob.
-    blob = cv2.dnn.blobFromImage(frameOpencvDnn, 1.0, (300, 300), [
-                                 104, 117, 123], True, False)
-    # Pass the blob through the network and obtain the detections and predictions.
-    net.setInput(blob)
-    # net.forward() method detects the faces and stores the data in detections
-    detections = net.forward()
+    """Legacy function - use model_manager.detect_faces instead"""
+    return model_manager.detect_faces(frame, conf_threshold)
 
-    faceBoxes = []
-
-    # This for loop is for drawing rectangle on detected face.
-    for i in range(detections.shape[2]):    # Looping over the detections.
-        # Extract the confidence (i.e., probability) associated with the prediction.
-        confidence = detections[0, 0, i, 2]
-        if confidence > conf_threshold:   # Compare it to the confidence threshold.
-            # Compute the (x, y)-coordinates of the bounding box for the face.
-            x1 = int(detections[0, 0, i, 3]*frameWidth)
-            y1 = int(detections[0, 0, i, 4]*frameHeight)
-            x2 = int(detections[0, 0, i, 5]*frameWidth)
-            y2 = int(detections[0, 0, i, 6]*frameHeight)
-            # Drawing the bounding box of the face.
-            faceBoxes.append([x1, y1, x2, y2])
-            cv2.rectangle(frameOpencvDnn, (x1, y1), (x2, y2),
-                          (0, 255, 0), int(round(frameHeight/150)), 8)
-    return frameOpencvDnn, faceBoxes
+def predict_age_gender(face, age_net, gender_net):
+    """Legacy function - use model_manager.predict_age_gender instead"""
+    return model_manager.predict_age_gender(face)
 
 
 # Gives input img to the prg for detection.
@@ -69,171 +64,204 @@ Both files are required when using models trained using Caffe for deep learning.
 '''
 
 def gen_frames():
-    faceProto = "opencv_face_detector.pbtxt"
-    faceModel = "opencv_face_detector_uint8.pb"
-    ageProto = "age_deploy.prototxt"
-    ageModel = "age_net.caffemodel"
-    genderProto = "gender_deploy.prototxt"
-    genderModel = "gender_net.caffemodel"
+    """Generate video frames for live detection"""
+    if not model_manager.is_loaded():
+        logger.error("Models not loaded")
+        return
+    
+    try:
+        video = cv2.VideoCapture(0)
+        if not video.isOpened():
+            logger.error("Could not open camera")
+            return
+            
+        padding = Config.FACE_PADDING
+        
+        while True:
+            hasFrame, frame = video.read()
+            if not hasFrame:
+                break
 
-    MODEL_MEAN_VALUES = (78.4263377603, 87.7689143744, 114.895847746)
-    # Defining age range.
-    ageList = ['(0-2)', '(4-6)', '(8-12)', '(15-20)',
-               '(25-32)', '(38-43)', '(48-53)', '(60-100)']
-    genderList = ['Male', 'Female']
+            # Detect faces
+            resultImg, faceBoxes = model_manager.detect_faces(frame)
+            
+            if not faceBoxes:
+                logger.info("No face detected")
+            else:
+                for faceBox in faceBoxes:
+                    # Extract face region
+                    face = frame[max(0, faceBox[1]-padding):
+                               min(faceBox[3]+padding, frame.shape[0]-1), 
+                               max(0, faceBox[0]-padding):
+                               min(faceBox[2]+padding, frame.shape[1]-1)]
 
-    # LOAD NETWORK
-    faceNet = cv2.dnn.readNet(faceModel, faceProto)
-    ageNet = cv2.dnn.readNet(ageModel, ageProto)
-    genderNet = cv2.dnn.readNet(genderModel, genderProto)
+                    # Predict age and gender
+                    gender, age = model_manager.predict_age_gender(face)
+                    logger.info(f'Gender: {gender}, Age: {age[1:-1]} years')
 
-# Open a video file or an image file or a camera stream
-    video = cv2.VideoCapture(0)
-    padding = 20
-    while cv2.waitKey(1) < 0:
-        # Read frame
-        hasFrame, frame = video.read()
-        if not hasFrame:
-            cv2.waitKey()
-            break
-
-    # It will detect the no. of faces in the frame
-        resultImg, faceBoxes = highlightFace(faceNet, frame)
-        if not faceBoxes:   # If no faces are detected
-            print("No face detected")   # Then it will print this message
-
-        for faceBox in faceBoxes:
-            # print facebox
-            face = frame[max(0, faceBox[1]-padding):   # Face info is stored in this variable
-                         min(faceBox[3]+padding, frame.shape[0]-1), max(0, faceBox[0]-padding):min(faceBox[2]+padding, frame.shape[1]-1)]
-
-        # The dnn.blobFromImage takes care of pre-processing
-        # which includes setting the blob  dimensions and normalization.
-            blob = cv2.dnn.blobFromImage(
-                face, 1.0, (227, 227), MODEL_MEAN_VALUES, swapRB=False)
-            genderNet.setInput(blob)
-        # genderNet.forward method will detect the gender of each face detected
-            genderPreds = genderNet.forward()
-            gender = genderList[genderPreds[0].argmax()]
-            print(f'Gender: {gender}')  # print the gender in the console
-
-            ageNet.setInput(blob)
-        # ageNet.forward method will detect the age of the face detected
-            agePreds = ageNet.forward()
-            age = ageList[agePreds[0].argmax()]
-            print(f'Age: {age[1:-1]} years')    # print the age in the console
-
-        # Show the output frame
-            cv2.putText(resultImg, f'{gender}, {age}', (
-                faceBox[0], faceBox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
-        #cv2.imshow("Detecting age and gender", resultImg)
+                    # Draw prediction on frame with enhanced styling
+                    result_text = format_age_gender_result(gender, age)
+                    
+                    # Calculate text size for background rectangle
+                    font_scale = 0.8
+                    thickness = 2
+                    (text_width, text_height), baseline = cv2.getTextSize(result_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+                    
+                    # Draw background rectangle for better text visibility
+                    padding = 10
+                    cv2.rectangle(resultImg, 
+                                 (faceBox[0] - padding, faceBox[1] - text_height - baseline - padding*2),
+                                 (faceBox[0] + text_width + padding, faceBox[1] - padding),
+                                 (0, 0, 0), -1)  # Black background
+                    
+                    # Draw text with better contrast
+                    cv2.putText(resultImg, result_text, 
+                               (faceBox[0], faceBox[1] - baseline - padding), 
+                               cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), thickness, cv2.LINE_AA)
 
             if resultImg is None:
                 continue
 
             ret, encodedImg = cv2.imencode('.jpg', resultImg)
-            #resultImg = buffer.tobytes()
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + bytearray(encodedImg) + b'\r\n')
+                   
+    except Exception as e:
+        logger.error(f"Error in gen_frames: {str(e)}")
+    finally:
+        if 'video' in locals():
+            video.release()
 
 
-def gen_frames_photo(img_file):
-    faceProto = "opencv_face_detector.pbtxt"
-    faceModel = "opencv_face_detector_uint8.pb"
-    ageProto = "age_deploy.prototxt"
-    ageModel = "age_net.caffemodel"
-    genderProto = "gender_deploy.prototxt"
-    genderModel = "gender_net.caffemodel"
+def process_image(img_file):
+    """Process uploaded image and return annotated result"""
+    if not model_manager.is_loaded():
+        logger.error("Models not loaded")
+        return None
+    
+    try:
+        # Convert PIL image to OpenCV format
+        frame = cv2.cvtColor(img_file, cv2.COLOR_RGB2BGR)
+        padding = Config.FACE_PADDING
+        
+        # Detect faces
+        resultImg, faceBoxes = model_manager.detect_faces(frame)
+        
+        if not faceBoxes:
+            logger.info("No face detected in uploaded image")
+            # Return original image with "No face detected" message
+            cv2.putText(resultImg, "No face detected", (50, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        else:
+            for faceBox in faceBoxes:
+                # Extract face region
+                face = frame[max(0, faceBox[1]-padding):
+                           min(faceBox[3]+padding, frame.shape[0]-1), 
+                           max(0, faceBox[0]-padding):
+                           min(faceBox[2]+padding, frame.shape[1]-1)]
 
-    MODEL_MEAN_VALUES = (78.4263377603, 87.7689143744, 114.895847746)
-    # Defining age range.
-    ageList = ['(0-2)', '(4-6)', '(8-12)', '(15-20)',
-               '(25-32)', '(38-43)', '(48-53)', '(60-100)']
-    genderList = ['Male', 'Female']
+                # Predict age and gender
+                gender, age = model_manager.predict_age_gender(face)
+                logger.info(f'Gender: {gender}, Age: {age[1:-1]} years')
 
-    # LOAD NETWORK
-    faceNet = cv2.dnn.readNet(faceModel, faceProto)
-    ageNet = cv2.dnn.readNet(ageModel, ageProto)
-    genderNet = cv2.dnn.readNet(genderModel, genderProto)
+                # Draw prediction on frame with enhanced styling
+                result_text = format_age_gender_result(gender, age)
+                
+                # Calculate text size for background rectangle
+                font_scale = 0.8
+                thickness = 2
+                (text_width, text_height), baseline = cv2.getTextSize(result_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+                
+                # Draw background rectangle for better text visibility
+                padding = 10
+                cv2.rectangle(resultImg, 
+                             (faceBox[0] - padding, faceBox[1] - text_height - baseline - padding*2),
+                             (faceBox[0] + text_width + padding, faceBox[1] - padding),
+                             (0, 0, 0), -1)  # Black background
+                
+                # Draw text with better contrast
+                cv2.putText(resultImg, result_text, 
+                           (faceBox[0], faceBox[1] - baseline - padding), 
+                           cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 255, 255), thickness, cv2.LINE_AA)
 
-# Open a video file or an image file or a camera stream
-
-    frame = cv2.cvtColor(img_file, cv2.COLOR_BGR2RGB)
-    #frame = img_file
-    #hasFrame, frame = img_file.read()
-    #ret, frame = cv2.imencode('.jpg', img_file)
-    #video = cv2.VideoCapture(img_file)
-    padding = 20
-    while cv2.waitKey(1) < 0:
-        # Read frame
-        #hasFrame, frame = video.read()
-        # if not hasFrame:
-        # cv2.waitKey()
-        # break
-
-        # It will detect the no. of faces in the frame
-        resultImg, faceBoxes = highlightFace(faceNet, frame)
-        if not faceBoxes:   # If no faces are detected
-            print("No face detected")   # Then it will print this message
-
-        for faceBox in faceBoxes:
-            # print facebox
-            face = frame[max(0, faceBox[1]-padding):   # Face info is stored in this variable
-                         min(faceBox[3]+padding, frame.shape[0]-1), max(0, faceBox[0]-padding):min(faceBox[2]+padding, frame.shape[1]-1)]
-
-        # The dnn.blobFromImage takes care of pre-processing
-        # which includes setting the blob  dimensions and normalization.
-            blob = cv2.dnn.blobFromImage(
-                face, 1.0, (227, 227), MODEL_MEAN_VALUES, swapRB=False)
-            genderNet.setInput(blob)
-        # genderNet.forward method will detect the gender of each face detected
-            genderPreds = genderNet.forward()
-            gender = genderList[genderPreds[0].argmax()]
-            print(f'Gender: {gender}')  # print the gender in the console
-
-            ageNet.setInput(blob)
-        # ageNet.forward method will detect the age of the face detected
-            agePreds = ageNet.forward()
-            age = ageList[agePreds[0].argmax()]
-            print(f'Age: {age[1:-1]} years')    # print the age in the console
-
-        # Show the output frame
-            cv2.putText(resultImg, f'{gender}, {age}', (
-                faceBox[0], faceBox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
-        #cv2.imshow("Detecting age and gender", resultImg)
-
-            if resultImg is None:
-                continue
-
-            ret, encodedImg = cv2.imencode('.jpg', resultImg)
-            #resultImg = buffer.tobytes()
-            return (b'--frame\r\n'
-                    b'Content-Type: image/jpeg\r\n\r\n' + bytearray(encodedImg) + b'\r\n')
+        # Encode result image
+        ret, encodedImg = cv2.imencode('.jpg', resultImg)
+        return encodedImg.tobytes()
+        
+    except Exception as e:
+        logger.error(f"Error processing image: {str(e)}")
+        return None
 
 
 @app.route('/')
 def index():
-    """Video streaming home page."""
+    """Main page with options for live detection or photo upload"""
     return render_template('index.html')
 
 @app.route('/video_feed')
 def video_feed():
-    # Video streaming route. Put this in the src attribute of an img tag
+    """Video streaming route for live detection"""
+    if not model_manager.is_loaded():
+        return "Models not loaded. Please check the server logs.", 500
     return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/webcam')
 def webcam():
+    """Webcam detection page"""
     return render_template('webcam.html')
 
 @app.route('/upload', methods=['GET', 'POST'])
 def upload_file():
+    """Handle file upload and processing"""
+    if request.method == 'GET':
+        return render_template('photo.html')
+    
     if request.method == 'POST':
-        f = request.files['fileToUpload'].read()
-        img = Image.open(io.BytesIO(f))
-        img_ip = np.asarray(img, dtype="uint8")
-        print(img_ip)
-        return Response(gen_frames_photo(img_ip), mimetype='multipart/x-mixed-replace; boundary=frame')
-        # return 'file uploaded successfully'
+        # Validate file upload
+        is_valid, message = validate_image_file(request.files.get('fileToUpload'))
+        if not is_valid:
+            flash(message)
+            return redirect(request.url)
+        
+        file = request.files['fileToUpload']
+        
+        try:
+            # Read and process image
+            file_data = file.read()
+            img = Image.open(io.BytesIO(file_data))
+            img_array = np.asarray(img, dtype="uint8")
+            
+            # Process image
+            result_bytes = process_image(img_array)
+            
+            if result_bytes is None:
+                flash('Error processing image. Please try again.')
+                return redirect(request.url)
+            
+            # Return processed image
+            return Response(result_bytes, mimetype='image/jpeg')
+            
+        except Exception as e:
+            logger.error(f"Error processing uploaded file: {str(e)}")
+            flash('Error processing image. Please try again.')
+            return redirect(request.url)
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy' if model_manager.is_loaded() else 'unhealthy',
+        'models_loaded': model_manager.is_loaded()
+    })
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Load models at startup
+    if not model_manager.load_models():
+        logger.error("Failed to load models. Exiting.")
+        exit(1)
+    
+    # Create upload folder if it doesn't exist
+    create_upload_folder()
+    
+    logger.info("Starting Flask application...")
+    app.run(debug=app.config['DEBUG'], host=app.config['HOST'], port=app.config['PORT'])
